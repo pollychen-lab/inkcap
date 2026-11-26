@@ -80,6 +80,28 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
+func TestWatchRequiresFiles(t *testing.T) {
+	if code, _, errOut := cli(t, "# Piped", "-watch", "-"); code != 1 || !strings.Contains(errOut, "requires a file input and file output") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+func TestFileSnapshotDetectsChangesAndMissingFiles(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "asset.png")
+	before := fileSnapshot([]string{p})
+	if err := os.WriteFile(p, []byte("asset"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after := fileSnapshot([]string{p})
+	if snapshotsEqual(before, after) {
+		t.Fatal("snapshot did not detect file creation")
+	}
+	if !snapshotsEqual(after, fileSnapshot([]string{p})) {
+		t.Fatal("unchanged file has different snapshot")
+	}
+}
+
 // "-" reads markdown from stdin and, with no -o, writes the PDF to stdout
 // (and does not print a path into the PDF stream).
 func TestStdinToStdout(t *testing.T) {

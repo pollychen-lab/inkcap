@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/scttfrdmn/inkcap/internal/config"
 	"github.com/scttfrdmn/inkcap/internal/pdfdoc"
@@ -73,6 +74,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		notes   = fs.String("footnotes", "", "override footnote placement: page | end | none")
 		nums    = fs.Bool("linenumbers", false, "number lines in code blocks")
 		quiet   = fs.Bool("q", false, "suppress warnings")
+		watch   = fs.Bool("watch", false, "re-render when the input, images, or config changes")
 	)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, "usage: inkcap [flags] file.md   (use - to read stdin)\n       inkcap init [-force]\n       inkcap version\n\n")
@@ -149,6 +151,28 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if !fromStdin && dst != "-" && samePath(in, dst) {
 		return fail(fmt.Errorf("output %s would overwrite the input; use -o to pick another name", dst))
 	}
+	if *watch {
+		if fromStdin || dst == "-" {
+			return fail(fmt.Errorf("-watch requires a file input and file output"))
+		}
+		cleanArgs := withoutWatch(args)
+		if code := run(cleanArgs, stdin, stdout, stderr); code != 0 {
+			return code
+		}
+		watchFiles := func() []string { return renderInputs(in, *cfgPath) }
+		previous := fileSnapshot(watchFiles())
+		for range time.NewTicker(500 * time.Millisecond).C {
+			current := fileSnapshot(watchFiles())
+			if snapshotsEqual(previous, current) {
+				continue
+			}
+			previous = current
+			if code := run(cleanArgs, stdin, stdout, stderr); code != 0 {
+				fmt.Fprintln(stderr, "inkcap: watch render failed; waiting for another change")
+			}
+			previous = fileSnapshot(watchFiles())
+		}
+	}
 
 	theme, err := pdfdoc.New(cfg)
 	if err != nil {
@@ -184,6 +208,76 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, dst)
 	}
 	return 0
+}
+
+func withoutWatch(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "-watch" || arg == "--watch" || arg == "-watch=true" || arg == "--watch=true" {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func renderInputs(input, configPath string) []string {
+	cfg, _, _ := config.Load(configPath)
+	files := []string{input}
+	if configPath == "" {
+		configPath = config.Path()
+	}
+	if configPath != "" {
+		files = append(files, configPath)
+	}
+	if src, err := os.ReadFile(input); err == nil {
+		if refs, err := pdfdoc.Resources(src, filepath.Dir(input)); err == nil {
+			files = append(files, refs...)
+		}
+	}
+	for _, face := range []config.Face{cfg.Fonts.Text, cfg.Fonts.Mono} {
+		files = append(files, face.Regular, face.Bold, face.Italic, face.BoldItalic)
+	}
+	files = append(files, cfg.Fonts.Fallback...)
+	return files
+}
+
+type fileState struct {
+	size     int64
+	modified int64
+	mode     os.FileMode
+}
+
+func fileSnapshot(paths []string) map[string]fileState {
+	snapshot := make(map[string]fileState, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			snapshot[abs] = fileState{}
+			continue
+		}
+		snapshot[abs] = fileState{size: info.Size(), modified: info.ModTime().UnixNano(), mode: info.Mode()}
+	}
+	return snapshot
+}
+
+func snapshotsEqual(a, b map[string]fileState) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for path, state := range a {
+		if b[path] != state {
+			return false
+		}
+	}
+	return true
 }
 
 // samePath reports whether a and b name the same file: the same file on disk

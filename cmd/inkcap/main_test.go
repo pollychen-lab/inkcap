@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -83,6 +84,15 @@ func TestUsageErrors(t *testing.T) {
 func TestWatchRequiresFiles(t *testing.T) {
 	if code, _, errOut := cli(t, "# Piped", "-watch", "-"); code != 1 || !strings.Contains(errOut, "requires a file input and file output") {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+func TestWithoutWatchRemovesBooleanTrueSpellings(t *testing.T) {
+	for _, value := range []string{"1", "t", "T", "TRUE", "True", "true"} {
+		got := withoutWatch([]string{"-watch=" + value, "doc.md"})
+		if !slices.Equal(got, []string{"doc.md"}) {
+			t.Errorf("withoutWatch(-watch=%s) = %#v", value, got)
+		}
 	}
 }
 

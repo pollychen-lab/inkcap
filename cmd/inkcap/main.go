@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,11 +157,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("-watch requires a file input and file output"))
 		}
 		cleanArgs := withoutWatch(args)
+		previous := fileSnapshot(renderInputs(in, *cfgPath))
 		if code := run(cleanArgs, stdin, stdout, stderr); code != 0 {
 			return code
 		}
 		watchFiles := func() []string { return renderInputs(in, *cfgPath) }
-		previous := fileSnapshot(watchFiles())
 		for range time.NewTicker(500 * time.Millisecond).C {
 			current := fileSnapshot(watchFiles())
 			if snapshotsEqual(previous, current) {
@@ -170,7 +171,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if code := run(cleanArgs, stdin, stdout, stderr); code != 0 {
 				fmt.Fprintln(stderr, "inkcap: watch render failed; waiting for another change")
 			}
-			previous = fileSnapshot(watchFiles())
 		}
 	}
 
@@ -213,8 +213,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func withoutWatch(args []string) []string {
 	out := make([]string, 0, len(args))
 	for _, arg := range args {
-		if arg == "-watch" || arg == "--watch" || arg == "-watch=true" || arg == "--watch=true" {
+		if arg == "-watch" || arg == "--watch" {
 			continue
+		}
+		if name, value, ok := strings.Cut(arg, "="); ok && (name == "-watch" || name == "--watch") {
+			if enabled, err := strconv.ParseBool(value); err == nil && enabled {
+				continue
+			}
 		}
 		out = append(out, arg)
 	}

@@ -148,7 +148,11 @@ func Resources(src []byte, baseDir string) ([]string, error) {
 		if err != nil || u.IsAbs() {
 			return
 		}
-		p := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(u.Path)))
+		p := filepath.FromSlash(u.Path)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(baseDir, p)
+		}
+		p = filepath.Clean(p)
 		seen[p] = true
 	}
 	if meta.Logo != "" {

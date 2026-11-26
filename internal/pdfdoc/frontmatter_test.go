@@ -18,6 +18,17 @@ func TestResourcesFindsLocalImages(t *testing.T) {
 	}
 }
 
+func TestResourcesPreservesAbsoluteImagePaths(t *testing.T) {
+	got, err := Resources([]byte("![absolute](/assets/figure.png)\n"), "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/assets/figure.png"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Resources() = %#v, want %#v", got, want)
+	}
+}
+
 func TestFrontMatterParsed(t *testing.T) {
 	cases := []struct {
 		name, src string
